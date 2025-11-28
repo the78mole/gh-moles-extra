@@ -2,14 +2,14 @@ package cmd
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/cli/go-gh/v2/pkg/api"
+	"github.com/cli/go-gh/v2/pkg/repository"
 	"github.com/spf13/cobra"
 )
 
@@ -40,9 +40,16 @@ func init() {
 	cleanupCmd.Flags().BoolVarP(&deleteFailedOnly, "failed", "f", false, "Delete all failed runs instead of keeping recent ones")
 }
 
+// workflowRun represents a GitHub Actions workflow run
 type workflowRun struct {
-	DatabaseID int64  `json:"databaseId"`
+	ID         int64  `json:"id"`
 	Conclusion string `json:"conclusion"`
+}
+
+// workflowRunsResponse represents the API response for listing workflow runs
+type workflowRunsResponse struct {
+	TotalCount   int           `json:"total_count"`
+	WorkflowRuns []workflowRun `json:"workflow_runs"`
 }
 
 func runCleanup(cmd *cobra.Command, args []string) error {
@@ -69,21 +76,22 @@ func runCleanup(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
-	// Check if gh CLI is available
-	if _, err := exec.LookPath("gh"); err != nil {
-		return fmt.Errorf("❌ Error: GitHub CLI (gh) is not installed or not in PATH\nPlease install it from: https://cli.github.com/")
+	// Get current repository from git context
+	repo, err := repository.Current()
+	if err != nil {
+		return fmt.Errorf("❌ Error: Could not determine current repository\nMake sure you're in a git repository: %w", err)
 	}
 
-	// Check if we're authenticated with GitHub
-	authCmd := exec.Command("gh", "auth", "status")
-	if err := authCmd.Run(); err != nil {
-		return fmt.Errorf("❌ Error: Not authenticated with GitHub CLI\nPlease run: gh auth login")
+	// Create REST API client (handles authentication automatically)
+	client, err := api.DefaultRESTClient()
+	if err != nil {
+		return fmt.Errorf("❌ Error: Could not create GitHub API client\nPlease run: gh auth login\n%w", err)
 	}
 
 	fmt.Println("📈 Analyzing workflow runs...")
 
-	// Get all workflow runs
-	runs, err := getWorkflowRuns()
+	// Get all workflow runs using the GitHub API
+	runs, err := getWorkflowRuns(client, repo.Owner, repo.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get workflow runs: %w", err)
 	}
@@ -94,7 +102,7 @@ func runCleanup(cmd *cobra.Command, args []string) error {
 		// Filter failed runs
 		for _, run := range runs {
 			if run.Conclusion == "failure" {
-				runsToDelete = append(runsToDelete, run.DatabaseID)
+				runsToDelete = append(runsToDelete, run.ID)
 			}
 		}
 		fmt.Printf("   Found %d failed runs\n", len(runsToDelete))
@@ -117,7 +125,7 @@ func runCleanup(cmd *cobra.Command, args []string) error {
 		// Runs are already sorted by date (newest first) from the API
 		// So we skip the first keepCount and delete the rest
 		for i := keepCount; i < totalRuns; i++ {
-			runsToDelete = append(runsToDelete, runs[i].DatabaseID)
+			runsToDelete = append(runsToDelete, runs[i].ID)
 		}
 		fmt.Printf("🗑️  Will delete %d old runs (keeping newest %d)\n", len(runsToDelete), keepCount)
 	}
@@ -168,7 +176,7 @@ func runCleanup(cmd *cobra.Command, args []string) error {
 	for i, runID := range runsToDelete {
 		fmt.Printf("   Deleting run %d... ", runID)
 
-		if err := deleteWorkflowRun(runID); err != nil {
+		if err := deleteWorkflowRun(client, repo.Owner, repo.Name, runID); err != nil {
 			fmt.Println("❌ (failed or already deleted)")
 			failedCount++
 		} else {
@@ -199,25 +207,33 @@ func runCleanup(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func getWorkflowRuns() ([]workflowRun, error) {
-	// Use a high limit to get all runs (GitHub API typically limits to ~1000)
-	cmd := exec.Command("gh", "run", "list", "--limit", "10000", "--json", "databaseId,conclusion")
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list workflow runs: %w", err)
+// getWorkflowRuns retrieves all workflow runs from the GitHub API
+func getWorkflowRuns(client *api.RESTClient, owner, repo string) ([]workflowRun, error) {
+	var allRuns []workflowRun
+	page := 1
+	perPage := 100 // Maximum allowed by API
+
+	for {
+		path := fmt.Sprintf("repos/%s/%s/actions/runs?per_page=%d&page=%d", owner, repo, perPage, page)
+		var response workflowRunsResponse
+		if err := client.Get(path, &response); err != nil {
+			return nil, fmt.Errorf("failed to list workflow runs: %w", err)
+		}
+
+		allRuns = append(allRuns, response.WorkflowRuns...)
+
+		// Check if we've got all runs
+		if len(response.WorkflowRuns) < perPage || len(allRuns) >= response.TotalCount {
+			break
+		}
+		page++
 	}
 
-	var runs []workflowRun
-	if err := json.Unmarshal(output, &runs); err != nil {
-		return nil, fmt.Errorf("failed to parse workflow runs: %w", err)
-	}
-
-	return runs, nil
+	return allRuns, nil
 }
 
-func deleteWorkflowRun(runID int64) error {
-	cmd := exec.Command("gh", "run", "delete", strconv.FormatInt(runID, 10))
-	// Provide 'y' as input for confirmation
-	cmd.Stdin = strings.NewReader("y\n")
-	return cmd.Run()
+// deleteWorkflowRun deletes a single workflow run using the GitHub API
+func deleteWorkflowRun(client *api.RESTClient, owner, repo string, runID int64) error {
+	path := fmt.Sprintf("repos/%s/%s/actions/runs/%d", owner, repo, runID)
+	return client.Delete(path, nil)
 }
