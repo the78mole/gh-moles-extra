@@ -1,0 +1,4 @@
+name: moles
+description: A GitHub CLI extension that provides tools for managing GitHub repositories
+version: 1.0.0
+host: gh
