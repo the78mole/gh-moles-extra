@@ -33,6 +33,12 @@ jobs:
           bump_each_commit: true
           search_commit_body: true
 
+      - name: Update manifest version
+        run: |
+          VERSION=${{ steps.semver.outputs.version }}
+          sed -i "s/version: .*/version: ${VERSION}/" manifest.yml
+          echo "Updated manifest.yml to version ${VERSION}"
+
       - name: Build binaries
         run: |
           VERSION=${{ steps.semver.outputs.version }}
