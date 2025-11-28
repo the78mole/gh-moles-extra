@@ -20,23 +20,23 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6.1.0
         with:
-          go-version: '1.23'
+          go-version: "1.23"
 
       - name: Get Next Version
         id: semver
         uses: paulhatch/semantic-version@v5.4.0
         with:
           tag_prefix: "v"
-          major_pattern: "(MAJOR)"
-          minor_pattern: "(MINOR)"
+          major_pattern: "/(feat|fix|refactor)!:/"
+          minor_pattern: "/^feat:/"
           version_format: "${major}.${minor}.${patch}"
-          bump_each_commit: false
+          bump_each_commit: true
           search_commit_body: true
 
       - name: Build binaries
         run: |
           VERSION=${{ steps.semver.outputs.version }}
-          
+
           # Build for multiple platforms
           GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o gh-moles-linux-amd64 .
           GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o gh-moles-linux-arm64 .
