@@ -7,7 +7,7 @@ A GitHub CLI extension that provides tools for managing GitHub repositories.
 Install this extension using the GitHub CLI:
 
 ```bash
-gh extension install the78mole/gh-moles-extra
+gh extension install the78mole/gh-moles
 ```
 
 ## Usage
