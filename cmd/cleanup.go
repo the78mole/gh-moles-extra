@@ -20,8 +20,9 @@ var (
 )
 
 var cleanupCmd = &cobra.Command{
-	Use:   "cleanup [KEEP_COUNT]",
-	Short: "Delete old GitHub Actions workflow runs",
+	Use:     "cleanup [KEEP_COUNT]",
+	Aliases: []string{"clean"},
+	Short:   "Delete old GitHub Actions workflow runs",
 	Long: `Delete old workflow runs, keeping only the most recent ones OR delete all failed runs.
 
 Examples:
