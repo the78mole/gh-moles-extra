@@ -1,4 +1,4 @@
-# gh-moles-extra
+# gh-moles
 
 A GitHub CLI extension that provides tools for managing GitHub repositories.
 
